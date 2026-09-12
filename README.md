@@ -113,20 +113,7 @@ Response:
 }
 ```
 
-## Basic evaluation
 
-Before calling this "done," write down 10 questions you already know the
-answer to from your own docs, run them through `/ask`, and check:
-
-1. Did it retrieve the right source file?
-2. Is the answer actually grounded in the retrieved chunk (not
-   hallucinated)?
-3. For an out-of-scope question (something not in your docs), does it
-   correctly say it couldn't find an answer instead of guessing?
-
-Keeping a small table of these results (question / expected source /
-got it right Y-N) is a lightweight but credible way to show you
-validated the system, not just got it to run once.
 
 ## Next steps (if you want to extend this later)
 

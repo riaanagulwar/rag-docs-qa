@@ -1,0 +1,58 @@
+[
+  {
+    "id": "q1",
+    "question": "When was the Roman Republic established and how?",
+    "category": "in_scope",
+    "expected_source_file": "test-doc1.md",
+    "expected_keywords": ["509 BC"]
+  },
+  {
+    "id": "q2",
+    "question": "What happened to Julius Caesar on the Ides of March?",
+    "category": "in_scope",
+    "expected_source_file": "test-doc1.md",
+    "expected_keywords": ["assassinated"]
+  },
+  {
+    "id": "q3",
+    "question": "When did the Western Roman Empire fall and who deposed the last emperor?",
+    "category": "in_scope",
+    "expected_source_file": "test-doc1.md",
+    "expected_keywords": ["476", "Odoacer"]
+  },
+  {
+    "id": "q4",
+    "question": "What year did the Space Race begin with the launch of Sputnik?",
+    "category": "in_scope",
+    "expected_source_file": "test-doc2.md",
+    "expected_keywords": ["1957", "Sputnik"]
+  },
+  {
+    "id": "q5",
+    "question": "Who were the first astronauts to walk on the Moon and when?",
+    "category": "in_scope",
+    "expected_source_file": "test-doc2.md",
+    "expected_keywords": ["Armstrong", "1969"]
+  },
+  {
+    "id": "q6",
+    "question": "Which Apollo mission was the last to land astronauts on the Moon?",
+    "category": "in_scope",
+    "expected_source_file": "test-doc2.md",
+    "expected_keywords": ["Apollo 17"]
+  },
+  {
+    "id": "q7",
+    "question": "What caused the fall of the Byzantine Empire?",
+    "category": "out_of_scope",
+    "expected_source_file": null,
+    "expected_keywords": ["couldn't find"]
+  },
+  {
+    "id": "q8",
+    "question": "What is the boiling point of water at sea level in Celsius?",
+    "category": "out_of_scope",
+    "expected_source_file": null,
+    "expected_keywords": ["couldn't find"]
+  }
+]

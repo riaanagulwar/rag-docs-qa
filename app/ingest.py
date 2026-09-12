@@ -1,8 +1,10 @@
-"""
-Run this script to (re)ingest all documents in the docs folder.
+"""(Re)ingest every document in the docs folder into Postgres.
 
-Usage:
     python -m app.ingest
+
+Each run wipes the doc_chunks table and rebuilds it from scratch -- there is no
+incremental update. A failure partway through (e.g. a Gemini error) leaves the
+corpus partially populated.
 """
 import os
 import sys
@@ -10,15 +12,15 @@ import time
 
 from app import config, db
 from app.chunker import chunk_text
-from app.embeddings import embed_text
+from app.embeddings import TASK_DOCUMENT, embed_texts
 
 
-def load_docs(folder: str):
+# Read every .md / .txt file in `folder` as (filename, text).
+def load_docs(folder):
     docs = []
     for fname in os.listdir(folder):
         if fname.lower().endswith((".md", ".txt")):
-            path = os.path.join(folder, fname)
-            with open(path, "r", encoding="utf-8") as f:
+            with open(os.path.join(folder, fname), "r", encoding="utf-8") as f:
                 docs.append((fname, f.read()))
     return docs
 
@@ -41,14 +43,13 @@ def main():
         chunks = chunk_text(text)
         print(f"  {fname}: {len(chunks)} chunks")
 
-        rows = []
-        for i, chunk in enumerate(chunks):
-            embedding = embed_text(chunk, task_type="retrieval_document")
-            rows.append((fname, i, chunk, embedding))
-            time.sleep(0.05)  # gentle on free-tier rate limits
+        # One embedding call per file instead of one per chunk.
+        embeddings = embed_texts(chunks, task_type=TASK_DOCUMENT)
+        rows = [(fname, i, chunk, emb) for i, (chunk, emb) in enumerate(zip(chunks, embeddings))]
 
         db.insert_chunks(rows)
         total_chunks += len(chunks)
+        time.sleep(0.05)  # stay under free-tier rate limits between files
 
     print(f"Done. Ingested {total_chunks} chunks from {len(docs)} document(s).")
 
