@@ -94,6 +94,66 @@ def has_relevant_chunk(chunks):
     return bool(chunks) and chunks[0]["similarity"] >= config.SIMILARITY_THRESHOLD
 
 
+# Full-text (keyword) search over chunk_tsv, ranked by ts_rank. Same return
+# shape as similarity_search, except "similarity" here holds the ts_rank
+# score, not cosine similarity -- the two aren't on the same scale, so don't
+# compare them directly (that's what hybrid_search's rank fusion is for).
+# Catches exact terms (names, numbers, acronyms) that embedding similarity
+# can miss.
+def keyword_search(query_text, top_k):
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT source_file, chunk_index, chunk_text,
+                   ts_rank(chunk_tsv, plainto_tsquery('english', %s)) AS rank
+            FROM doc_chunks
+            WHERE chunk_tsv @@ plainto_tsquery('english', %s)
+            ORDER BY rank DESC
+            LIMIT %s;
+            """,
+            (query_text, query_text, top_k),
+        )
+        rows = cur.fetchall()
+        cur.close()
+
+    return [
+        {
+            "source_file": r[0],
+            "chunk_index": r[1],
+            "chunk_text": r[2],
+            "similarity": float(r[3]),
+        }
+        for r in rows
+    ]
+
+
+# Merge multiple ranked result lists into one via Reciprocal Rank Fusion:
+# each item scores sum(1 / (k + rank)) across every list it appears in
+# (rank is 1-based). This avoids normalizing cosine similarity against
+# ts_rank, which are on unrelated scales -- only rank position matters.
+def _reciprocal_rank_fusion(result_lists, k=60):
+    scores = {}
+    items = {}
+    for results in result_lists:
+        for rank, item in enumerate(results, start=1):
+            key = (item["source_file"], item["chunk_index"])
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
+            items.setdefault(key, item)
+
+    ranked_keys = sorted(scores, key=scores.get, reverse=True)
+    return [{**items[key], "rrf_score": scores[key]} for key in ranked_keys]
+
+
+# Hybrid search: fuse vector similarity and keyword search results via RRF.
+# Each side is fetched wider (fetch_k) than what's ultimately returned, so
+# fusion has enough candidates from both to rank fairly.
+def hybrid_search(query_text, query_embedding, top_k, fetch_k=20):
+    vector_results = similarity_search(query_embedding, fetch_k)
+    keyword_results = keyword_search(query_text, fetch_k)
+    return _reciprocal_rank_fusion([vector_results, keyword_results])[:top_k]
+
+
 # Wipe every chunk and reset the id sequence. Called at the start of each
 # full re-ingest.
 def clear_all_chunks():

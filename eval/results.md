@@ -20,3 +20,18 @@
 | q7 | out_of_scope | Y | n/a | Y | Y | - -> test-doc1.md |
 | q8 | out_of_scope | Y | n/a | Y | Y | - -> test-doc2.md |
 
+## Run 2026-09-16 20:30:26 UTC
+
+- retrieval=compare, top_k=4, embedding_model=gemini-embedding-001, generation_model=gemini-3.8-flash, similarity_threshold=0.5
+- Retrieval hit rate (in-scope): vector 3/3, hybrid 3/3
+- Mean recall@k (in-scope): vector 1.00, hybrid 1.00
+- Correctness/faithfulness (in-scope): 3/3
+- Anti-hallucination (out-of-scope): n/a
+- Overall: 3/3
+
+| id | category | vec-hit | vec-recall | hyb-hit | hyb-recall | keyword | pass | expected -> got |
+|----|----------|---------|------------|---------|------------|---------|------|-----------------|
+| q1 | in_scope | Y | 1.00 | Y | 1.00 | Y | Y | test-doc1.md -> test-doc1.md |
+| q2 | in_scope | Y | 1.00 | Y | 1.00 | Y | Y | test-doc1.md -> test-doc1.md |
+| q3 | in_scope | Y | 1.00 | Y | 1.00 | Y | Y | test-doc1.md -> test-doc1.md |
+

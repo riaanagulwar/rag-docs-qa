@@ -26,7 +26,7 @@ following the earlier Mercury and Gemini programs.
 On July 20, 1969, the Apollo 11 mission's lunar module Eagle landed in the
 Sea of Tranquility. Neil Armstrong became the first human to step onto the
 lunar surface, followed shortly after by Buzz Aldrin, while Michael Collins
-orbited above in the command module.
+orbited above in the command module, call-signed Columbia.
 
 ## Legacy of the Apollo Program
 

@@ -24,20 +24,23 @@ Postgres+pgvector for semantic search and Gemini for embeddings/generation.
 Docs (markdown/text files)
    |
    v
-chunker.py  --  fixed-size chunks with overlap
+chunker.py  --  header-aware chunks (markdown "#" or plain-text headings),
+                 recursive splitting + overlap for oversized sections
    |
    v
-embeddings.py  --  Gemini text-embedding-004 (768-dim)
+embeddings.py  --  Gemini gemini-embedding-001, truncated to 768-dim
    |
    v
-Postgres + pgvector  --  doc_chunks table, ivfflat cosine index
+Postgres + pgvector  --  doc_chunks table, ivfflat cosine index + full-text GIN index
 
 Query flow:
 User question
-   -> embed_text(question, task_type="retrieval_query")
-   -> db.similarity_search()  top-k nearest chunks
-   -> generate_answer()  Gemini answers using only retrieved context
-   -> answer + source chunks returned to caller
+   -> embed_text(question, task_type="RETRIEVAL_QUERY")
+   -> db.hybrid_search()  vector + keyword search, fused via Reciprocal Rank Fusion
+   -> generate_answer()  Gemini answers using only retrieved context, citing
+                          sources by number ([1], [2]) -- skipped entirely if
+                          nothing retrieved clears SIMILARITY_THRESHOLD
+   -> answer + source chunks (flagged `cited: true/false`) returned to caller
 ```
 
 ## Setup
@@ -71,8 +74,10 @@ https://aistudio.google.com/apikey).
 
 ### 4. Add documents
 
-Drop `.md` or `.txt` files into the `docs/` folder. See `docs/README.md`
-for suggestions on what to use.
+Drop `.md` or `.txt` files into the `docs/` folder. A small sample corpus
+(`docs/test-doc*.md`) is already there so the app works out of the box;
+swap in your own docs whenever you're ready (and update
+`eval/questions.json` to match if you want the eval harness to keep working).
 
 ### 5. Ingest documents
 
@@ -94,20 +99,21 @@ uvicorn app.main:app --reload
 ```bash
 curl -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is the difference between a mutex and a semaphore?"}'
+  -d '{"question": "What was the Athenian assembly called, where citizens could speak and vote directly?"}'
 ```
 
 Response:
 
 ```json
 {
-  "answer": "A mutex ... [Source: lld_guide.md]",
+  "answer": "The Space Race began in 1957, when the Soviet Union launched Sputnik [1].",
   "sources": [
     {
-      "source_file": "lld_guide.md",
-      "chunk_index": 3,
-      "similarity": 0.86,
-      "chunk_text": "..."
+      "source_file": "test-doc2.md",
+      "chunk_index": 1,
+      "similarity": 0.81,
+      "chunk_text": "The Space Race was a Cold War-era competition...",
+      "cited": true
     }
   ]
 }
@@ -115,12 +121,28 @@ Response:
 
 
 
+## Testing and evaluation
+
+```bash
+pip3 install -r requirements-dev.txt   # adds pytest
+pytest                                  # unit tests, no live DB/Gemini needed
+
+python -m eval.run_eval                 # retrieval/recall/faithfulness/
+python -m eval.run_eval --retrieval compare  # citation/anti-hallucination
+```
+
+`pytest` covers pure logic (chunking, rank fusion, citation parsing, retry
+behavior, request handlers with mocked dependencies) -- see `CLAUDE.md` for
+what it does and doesn't cover. `eval/run_eval.py` is what actually exercises
+retrieval and generation against real Postgres + Gemini; results are appended
+to `eval/results.md` as a running log.
+
 ## Next steps (if you want to extend this later)
 
-- Semantic chunking instead of fixed-size splitting
-- Hybrid search (keyword + vector) for exact-term queries (error codes,
-  function names)
+- Semantic chunking instead of size-based splitting for oversized sections
 - Reranking retrieved chunks before generation
+- Incremental re-ingest (currently every `app.ingest` run wipes and rebuilds
+  the whole corpus)
 - Simple web UI instead of curl/Postman
 - Streaming responses
 
