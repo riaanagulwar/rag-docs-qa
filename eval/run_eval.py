@@ -6,20 +6,18 @@ in eval/questions.json.
 
 --retrieval chooses what does retrieval:
     vector   (default) -- db.similarity_search only, unchanged baseline.
-    hybrid   -- db.hybrid_search only (vector + keyword, fused via RRF).
+    hybrid   -- db.hybrid_search only (vector + BM25 keyword, fused via RRF).
     compare  -- runs BOTH for every question and reports them side by side,
                 so you can see whether keyword search actually helps. Answer
                 generation only runs once per question, from the hybrid
                 result -- comparing retrieval costs zero extra Gemini calls
-                (keyword search is Postgres-only, and the question embedding
-                is already computed once for the whole run).
+                (keyword search is in-process BM25, no API call, and the
+                question embedding is already computed once for the whole run).
 
 Requires Postgres running and ingested (docker compose up -d && python -m
 app.ingest) with the sample docs in docs/test-doc1.md, docs/test-doc2.md, and
-docs/test-doc3.md.
-hybrid/compare additionally require the chunk_tsv column from schema.sql,
-which only exists on a fresh Postgres volume -- see schema.sql's note. If you
-replace docs/ with your own corpus, update eval/questions.json to match.
+docs/test-doc3.md. If you replace docs/ with your own corpus, update
+eval/questions.json to match.
 
 Each question is graded on:
 - retrieval_hit: did the expected source file come back in the top-k chunks?

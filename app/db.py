@@ -3,11 +3,16 @@
 pgvector's `vector` type has no Python driver support, so embeddings are passed
 as bracketed literal strings ("[0.1,0.2,...]") and cast with ::vector in SQL.
 """
+import logging
+import re
 from contextlib import contextmanager
 
 import pg8000.dbapi as pg8000
+from rank_bm25 import BM25Okapi
 
 from app import config
+
+log = logging.getLogger("app.db")
 
 
 # Format a float sequence as a pgvector literal: [0.1,0.2,0.3]
@@ -94,44 +99,65 @@ def has_relevant_chunk(chunks):
     return bool(chunks) and chunks[0]["similarity"] >= config.SIMILARITY_THRESHOLD
 
 
-# Full-text (keyword) search over chunk_tsv, ranked by ts_rank. Same return
-# shape as similarity_search, except "similarity" here holds the ts_rank
-# score, not cosine similarity -- the two aren't on the same scale, so don't
-# compare them directly (that's what hybrid_search's rank fusion is for).
-# Catches exact terms (names, numbers, acronyms) that embedding similarity
-# can miss.
+_TOKEN_RE = re.compile(r"\w+")
+
+
+def _tokenize(text):
+    return _TOKEN_RE.findall(text.lower())
+
+
+# Rank `chunks` (each a dict with a "chunk_text" key) against query_text with
+# BM25 -- the same ranking algorithm behind Elasticsearch/Lucene keyword
+# search. A chunk matching only some of the query's words still gets a
+# (lower) score instead of being excluded outright, so a real question like
+# "Which Roman legion did Julius Caesar lead across the Rubicon?" still
+# surfaces the chunk that says "Caesar", "Rubicon", and "legion" even though
+# it never says "Roman". Pure function (no DB) so it's unit-testable without
+# Postgres.
+#
+# Excluded only by actual token overlap, not by score sign: BM25's score can
+# come out zero or negative for a chunk that DOES share a query term, purely
+# from IDF math on very common words in a small corpus (a term in most/all
+# chunks gets a negative IDF weight) -- filtering on "score > 0" would wrongly
+# drop a real partial match. Zero overlap is the only case that's genuinely
+# "no match".
+def _bm25_rank(chunks, query_text, top_k):
+    if not chunks:
+        return []
+    query_tokens = set(_tokenize(query_text))
+    chunk_tokens = [_tokenize(c["chunk_text"]) for c in chunks]
+    scores = BM25Okapi(chunk_tokens).get_scores(list(query_tokens))
+
+    candidates = [
+        (c, score) for c, score, tokens in zip(chunks, scores, chunk_tokens)
+        if query_tokens & set(tokens)
+    ]
+    candidates.sort(key=lambda pair: pair[1], reverse=True)
+    return [{**c, "similarity": float(score)} for c, score in candidates[:top_k]]
+
+
+# Keyword search via BM25, computed in memory over the whole corpus (cheap at
+# this scale; rebuilt fresh each call so it's always current, no cache to
+# invalidate on ingest). Same return shape as similarity_search, except
+# "similarity" here holds the BM25 score, not cosine similarity -- the two
+# aren't on the same scale, so don't compare them directly (that's what
+# hybrid_search's rank fusion is for). Catches exact terms (names, numbers,
+# acronyms) that embedding similarity can miss.
 def keyword_search(query_text, top_k):
     with _connect() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT source_file, chunk_index, chunk_text,
-                   ts_rank(chunk_tsv, plainto_tsquery('english', %s)) AS rank
-            FROM doc_chunks
-            WHERE chunk_tsv @@ plainto_tsquery('english', %s)
-            ORDER BY rank DESC
-            LIMIT %s;
-            """,
-            (query_text, query_text, top_k),
-        )
+        cur.execute("SELECT source_file, chunk_index, chunk_text FROM doc_chunks;")
         rows = cur.fetchall()
         cur.close()
 
-    return [
-        {
-            "source_file": r[0],
-            "chunk_index": r[1],
-            "chunk_text": r[2],
-            "similarity": float(r[3]),
-        }
-        for r in rows
-    ]
+    chunks = [{"source_file": r[0], "chunk_index": r[1], "chunk_text": r[2]} for r in rows]
+    return _bm25_rank(chunks, query_text, top_k)
 
 
 # Merge multiple ranked result lists into one via Reciprocal Rank Fusion:
 # each item scores sum(1 / (k + rank)) across every list it appears in
 # (rank is 1-based). This avoids normalizing cosine similarity against
-# ts_rank, which are on unrelated scales -- only rank position matters.
+# BM25 score, which are on unrelated scales -- only rank position matters.
 def _reciprocal_rank_fusion(result_lists, k=60):
     scores = {}
     items = {}
@@ -145,13 +171,31 @@ def _reciprocal_rank_fusion(result_lists, k=60):
     return [{**items[key], "rrf_score": scores[key]} for key in ranked_keys]
 
 
+# One-line summary of a result list for logging: how many hits, and the
+# identity + score of each (cosine similarity or BM25 score, whichever this list is).
+def _format_results(results):
+    return ", ".join(f"{r['source_file']}#{r['chunk_index']} ({r['similarity']:.3f})" for r in results) or "none"
+
+
 # Hybrid search: fuse vector similarity and keyword search results via RRF.
 # Each side is fetched wider (fetch_k) than what's ultimately returned, so
-# fusion has enough candidates from both to rank fairly.
+# fusion has enough candidates from both to rank fairly. Logs each side's raw
+# results before fusion -- the fused/RRF output alone hides which method
+# actually found what, which matters when you're trying to tell whether
+# keyword search is pulling its weight for a given query.
 def hybrid_search(query_text, query_embedding, top_k, fetch_k=20):
     vector_results = similarity_search(query_embedding, fetch_k)
     keyword_results = keyword_search(query_text, fetch_k)
-    return _reciprocal_rank_fusion([vector_results, keyword_results])[:top_k]
+    log.info("hybrid_search: vector: %d hit(s): %s", len(vector_results), _format_results(vector_results))
+    log.info("hybrid_search: keyword: %d hit(s): %s", len(keyword_results), _format_results(keyword_results))
+
+    fused = _reciprocal_rank_fusion([vector_results, keyword_results])[:top_k]
+    log.info(
+        "hybrid_search: fused top-%d: %s",
+        top_k,
+        ", ".join(f"{r['source_file']}#{r['chunk_index']} (rrf={r['rrf_score']:.4f})" for r in fused) or "none",
+    )
+    return fused
 
 
 # Wipe every chunk and reset the id sequence. Called at the start of each

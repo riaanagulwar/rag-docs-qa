@@ -37,8 +37,7 @@ Requires `GEMINI_API_KEY` in `.env` (copy from `.env.example`).
 If the embedding vector dimension changes, `EMBEDDING_DIMENSIONS` in
 `app/config.py` and `vector(768)` in `schema.sql` must be updated together, and
 Postgres must be re-initialized (`docker compose down -v && docker compose up -d`)
-since `schema.sql` only runs on first container boot -- this also applies to the
-`chunk_tsv` full-text column hybrid search needs.
+since `schema.sql` only runs on first container boot.
 
 ## Architecture
 
@@ -84,9 +83,11 @@ Key cross-file details:
 - **Embedding task_type matters.** Chunks use `embeddings.TASK_DOCUMENT`,
   questions use `embeddings.TASK_QUERY` — asymmetric embeddings, don't unify them.
 - **Hybrid search = RRF, not score blending.** `db.hybrid_search` fuses
-  `similarity_search` (cosine) and `keyword_search` (Postgres full-text,
-  `ts_rank`) by rank position (`_reciprocal_rank_fusion`), since cosine
-  similarity and `ts_rank` aren't on comparable scales.
+  `similarity_search` (cosine, Postgres/pgvector) and `keyword_search` (BM25,
+  computed in-process over the whole corpus via `rank_bm25` -- rebuilt fresh
+  each call, cheap at this scale, no cache to invalidate on ingest) by rank
+  position (`_reciprocal_rank_fusion`), since cosine similarity and BM25
+  score aren't on comparable scales.
 - **Citations are numbered, not filenames.** `embeddings._build_context_block`
   numbers chunks `[1]`, `[2]`... in the prompt; `parse_citations` maps a
   model's `[N]` back to a chunk index, silently dropping out-of-range numbers
@@ -101,6 +102,5 @@ Key cross-file details:
   backoff; other errors (bad request, auth, safety block) fail immediately.
 - Config models are hardcoded in `app/config.py`; everything else (chunk size,
   overlap, top_k, similarity threshold) comes from env vars with defaults.
-- `ivfflat` index (`lists = 100`) and the `chunk_tsv` GIN index are both
-  created in `schema.sql` before any data exists; `insert_chunks` runs
-  `ANALYZE` after bulk loads.
+- `ivfflat` index (`lists = 100`) is created in `schema.sql` before any data
+  exists; `insert_chunks` runs `ANALYZE` after bulk loads.

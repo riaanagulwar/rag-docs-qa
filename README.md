@@ -31,12 +31,13 @@ chunker.py  --  header-aware chunks (markdown "#" or plain-text headings),
 embeddings.py  --  Gemini gemini-embedding-001, truncated to 768-dim
    |
    v
-Postgres + pgvector  --  doc_chunks table, ivfflat cosine index + full-text GIN index
+Postgres + pgvector  --  doc_chunks table, ivfflat cosine index
 
 Query flow:
 User question
    -> embed_text(question, task_type="RETRIEVAL_QUERY")
-   -> db.hybrid_search()  vector + keyword search, fused via Reciprocal Rank Fusion
+   -> db.hybrid_search()  pgvector cosine search + in-process BM25 keyword
+                           search (rank_bm25), fused via Reciprocal Rank Fusion
    -> generate_answer()  Gemini answers using only retrieved context, citing
                           sources by number ([1], [2]) -- skipped entirely if
                           nothing retrieved clears SIMILARITY_THRESHOLD
@@ -99,7 +100,7 @@ uvicorn app.main:app --reload
 ```bash
 curl -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "What was the Athenian assembly called, where citizens could speak and vote directly?"}'
+  -d '{"question": "What year did the Space Race begin with the launch of Sputnik?"}'
 ```
 
 Response:
