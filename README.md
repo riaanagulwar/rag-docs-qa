@@ -4,19 +4,6 @@ A small Retrieval-Augmented Generation service: ask questions over your own
 markdown/text docs and get citation-grounded answers, powered by
 Postgres+pgvector for semantic search and Gemini for embeddings/generation.
 
-## Why this architecture
-
-- **pgvector instead of a dedicated vector DB** — if you already run
-  Postgres, there's no new infra to operate, back up, or monitor. For a
-  corpus of a few thousand chunks, `ivfflat` cosine similarity is pretty
-  fast; a dedicated vector DB only starts to matter at a scale this
-  project isn't targeting.
-- **Grounded generation, not free-text generation** — the prompt explicitly
-  instructs the model to say "I couldn't find this in the provided
-  documents" when retrieval comes back empty or irrelevant, instead of
-  letting it hallucinate an answer. This is arguably the most important
-  part of a RAG system and the part most tutorials skip.
-
 
 ## Architecture
 
@@ -138,7 +125,7 @@ what it does and doesn't cover. `eval/run_eval.py` is what actually exercises
 retrieval and generation against real Postgres + Gemini; results are appended
 to `eval/results.md` as a running log.
 
-## Next steps (if you want to extend this later)
+## Next steps
 
 - Semantic chunking instead of size-based splitting for oversized sections
 - Reranking retrieved chunks before generation
